@@ -138,34 +138,78 @@ plt.legend()
 plt.grid(True, linestyle='--', alpha=0.6)
 
 # PLOT 6: Rollout scatter plot of N leaching against relative yield for different control periods; 2x2, depending on whether there is rain during the first forecast and second forecast for the respective control frequency
-# Loop over all control frequencies, check for each frequency whether the has been rain in the first three days of the first actuation time, and the first three days of the second actuation time. Depending on the outcomes, plot the rollout's relative yield and amount of N leaching in the respective subplot.
+# 1. Setup and Filter Data
 fig, axs = plt.subplots(2, 2, figsize=(12, 10))
-control_periods = [3, 6, 9, 36]
-for cntrl_period in control_periods:
-    if cntrl_period in full_df.index.get_level_values(0):
-        subset = full_df.loc[cntrl_period]
-        for _, row in subset.iterrows():
-            if row["rainy_start"] and row["rainy_start"]:  # Rain in both periods
-                axs[0, 0].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
-            elif row["rainy_start"] and not row["rainy_start"]:  # Rain only in first period
-                axs[0, 1].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
-            elif not row["rainy_start"] and row["rainy_start"]:  # Rain only in second period
-                axs[1, 0].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
-            else:  # No rain in either period
-                axs[1, 1].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
 
-axs[0, 0].set_title("Rain in both periods")
-axs[0, 1].set_title("Rain only in first period")
-axs[1, 0].set_title("Rain only in second period")
-axs[1, 1].set_title("No rain in either period")
+# Find the penalty value closest to 0.2
+penalties = full_df.index.get_level_values(1).unique()
+closest_penalty = penalties[np.argmin(np.abs(penalties - 0.2))]
+
+# Extract data for the closest penalty and drop that level from the index
+df = full_df.xs(closest_penalty, level=1).copy()
+
+# Ensure index levels have names so we can reset and use them as columns safely
+# Forcefully rename the remaining 2 index levels before resetting
+df.index.names = ['cntrl_period', 'rollout_index']
+df = df.reset_index()
+
+# 2. Vectorize the Yield Calculation
+df['plot_y'] = df['relative_yield'] * N_SUFFICIENT_YIELD_G_GRAIN_PER_M2 * CORN_PRICE_USD_PER_G_GRAIN
+
+
+# 3. Fast Calculation for Rain Conditions
+def check_second_rain(row):
+    # Extract weather data using the rollout index
+    rainfall_data = rollout_parameters[row['rollout_index']].rainfalls
+    cp = row['cntrl_period']
+    rain_slice = rainfall_data[cp: cp + 3]
+
+    # Note: I used np.any() to check if it rained on *any* of the 3 days.
+    # Your original code used `[0] and [1] and [2]`, which requires rain on *all* 3 days.
+    # Change to np.all(rain_slice > 0) if you strictly need rain on every single day.
+    return np.any(rain_slice > 0)
+
+
+df['rainy_second_three_days'] = df.apply(check_second_rain, axis=1)
+
+# Ensure the first rain column is boolean to match
+df['rainy_start'] = df['rainy_start'].astype(bool)
+
+# 4. Group Data by Subplot Conditions and Plot in Bulk
+# We can map the booleans directly to subplot matrix coordinates!
+# not rain1 (0) -> col 0 | rain1 (1) -> col 1
+# not rain2 (0) -> row 0 | rain2 (1) -> row 1
+grouped = df.groupby(['rainy_second_three_days', 'rainy_start', 'cntrl_period'])
+
+for (rain2, rain1, cntrl_period), group in grouped:
+    row, col = int(rain2), int(rain1)
+
+    axs[row, col].scatter(
+        group['plot_y'],
+        group['total_leaching_gN_per_m2'],
+        label=f"Every {cntrl_period} days",
+        alpha=0.7
+    )
+
+# 5. Formatting and Titles
+axs[0, 0].set_title("No in 3 days after first two inputs")
+axs[0, 1].set_title("Rain in 3 days after first input only")
+axs[1, 0].set_title("Rain in 3 days after second input only")
+axs[1, 1].set_title("Rain in both periods")
+
 for ax in axs.flat:
-    ax.set_xlabel("Total N leaching (gN/m2)")
-    ax.set_ylabel("Relative Yield")
+    ax.set_ylabel("Total N leaching (gN/m2)")
+    ax.set_xlabel("Relative Yield Value")
     ax.grid(True, linestyle='--', alpha=0.6)
-    ax.legend()
 
+    # Optional: Add deduplicated legends to each subplot
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    if by_label:
+        ax.legend(by_label.values(), by_label.keys())
 
-
+plt.tight_layout()
+plt.savefig("rollout_scatter_leaching_vs_yield.png", dpi=300)
 
 # PLOT 7: P(violation) vs relative yield for non-violating rollouts only (same as 1. but the profit is only averaged over non-violating rollouts (lineplot)
 means = full_df.groupby(["control_period", "penalty"]).mean()
