@@ -138,23 +138,37 @@ plt.legend()
 plt.grid(True, linestyle='--', alpha=0.6)
 
 # PLOT 6: Rollout scatter plot of N leaching against relative yield for different control periods; 2x2, depending on whether there is rain during the first forecast and second forecast for the respective control frequency
-fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
-for i, cntrl_period in enumerate([3, 6, 9, 36]):
+# Loop over all control frequencies, check for each frequency whether the has been rain in the first three days of the first actuation time, and the first three days of the second actuation time. Depending on the outcomes, plot the rollout's relative yield and amount of N leaching in the respective subplot.
+fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+control_periods = [3, 6, 9, 36]
+for cntrl_period in control_periods:
     if cntrl_period in full_df.index.get_level_values(0):
         subset = full_df.loc[cntrl_period]
-        ax = axes[i // 2, i % 2]
-        ax.scatter(subset["total_leaching_gN_per_m2"], subset["relative_yield"] * N_SUFFICIENT_YIELD_G_GRAIN_PER_M2 * CORN_PRICE_USD_PER_G_GRAIN, alpha=0.5)
-        ax.set_title(f"Every {cntrl_period} days")
-        ax.set_xlabel("Total N leaching (gN/m²)")
-        ax.set_ylabel("Relative Yield Value")
-        ax.grid(True, linestyle='--', alpha=0.6)
+        for _, row in subset.iterrows():
+            if row["rainy_start"] and row["rainy_start"]:  # Rain in both periods
+                axs[0, 0].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
+            elif row["rainy_start"] and not row["rainy_start"]:  # Rain only in first period
+                axs[0, 1].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
+            elif not row["rainy_start"] and row["rainy_start"]:  # Rain only in second period
+                axs[1, 0].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
+            else:  # No rain in either period
+                axs[1, 1].scatter(row["total_leaching_gN_per_m2"], row["relative_yield"], label=f"Every {cntrl_period} days", alpha=0.6)
 
-# Plot 7 P(violation) vs relative yield for non-violating rollouts only (same as 1. but the profit is only averaged over non-violating rollouts (lineplot)
-# 1. Calculate the overall means to get the probability of violation (X-axis)
+axs[0, 0].set_title("Rain in both periods")
+axs[0, 1].set_title("Rain only in first period")
+axs[1, 0].set_title("Rain only in second period")
+axs[1, 1].set_title("No rain in either period")
+for ax in axs.flat:
+    ax.set_xlabel("Total N leaching (gN/m2)")
+    ax.set_ylabel("Relative Yield")
+    ax.grid(True, linestyle='--', alpha=0.6)
+    ax.legend()
+
+
+
+
+# PLOT 7: P(violation) vs relative yield for non-violating rollouts only (same as 1. but the profit is only averaged over non-violating rollouts (lineplot)
 means = full_df.groupby(["control_period", "penalty"]).mean()
-
-# 2. Calculate the means ONLY for non-violating trajectories (Y-axis)
-# We filter the full_df first, then group by the same indices
 success_means = full_df[~full_df["violated"]].groupby(["control_period", "penalty"]).mean()
 
 plt.figure('Rollout Pareto Fronts (Success-Only)', figsize=(8, 5))
