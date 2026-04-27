@@ -82,13 +82,14 @@ num_series = len(rollout_graph_data.fertilizer_adds_by_penalty)
 total_group_width = 0.8  # The total width used by all bars at a single time point
 bar_width = total_group_width / num_series
 
-# Lower subplot with modern bar chart styling
-for idx, fertilizer_adds in enumerate(rollout_graph_data.fertilizer_adds_by_penalty.values()):
-    # Calculate original x positions (same as before)
-    x_base = np.linspace(0, x_max, len(fertilizer_adds) + 1)[:-1] + 0.3
+# 1. Define a padding value to push everything right from the y-axis
+x_padding = 0.45
 
-    # Calculate offsets to place bars side-by-side within each time step
-    # This centers the group of bars over the original x coordinate
+for idx, fertilizer_adds in enumerate(rollout_graph_data.fertilizer_adds_by_penalty.values()):
+    # 2. Start x_base from the padding value instead of 0.3
+    x_base = np.linspace(0, x_max, len(fertilizer_adds) + 1)[:-1] + x_padding
+
+    # Calculate offsets (keep this logic the same)
     offset = (idx - num_series / 2) * bar_width + bar_width / 2
     x_pos = x_base + offset
 
@@ -96,7 +97,7 @@ for idx, fertilizer_adds in enumerate(rollout_graph_data.fertilizer_adds_by_pena
                  width=bar_width,
                  color=colors[idx + 1],
                  alpha=0.7,
-                 edgecolor='white',  # Adds a clean separation between bars
+                 edgecolor='white',
                  linewidth=0.5)
 
 lower_ax.set_title("Added fertilizer", fontsize=12, fontweight='bold', pad=10)
