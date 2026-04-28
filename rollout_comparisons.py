@@ -138,7 +138,7 @@ plt.legend()
 plt.grid(True, linestyle='--', alpha=0.6)
 
 # PLOT 6: Rollout scatter plot of N leaching against relative yield for different control periods; 2x2, depending on whether there is rain during the first forecast and second forecast for the respective control frequency
-# 1. Setup and Filter Data
+# Setup and Filter Data
 fig, axs = plt.subplots(2, 2, figsize=(12, 10))
 
 # Find the penalty value closest to 0.2
@@ -153,11 +153,11 @@ df = full_df.xs(closest_penalty, level=1).copy()
 df.index.names = ['cntrl_period', 'rollout_index']
 df = df.reset_index()
 
-# 2. Vectorize the Yield Calculation
+# Vectorize the Yield Calculation
 df['plot_y'] = df['relative_yield'] * N_SUFFICIENT_YIELD_G_GRAIN_PER_M2 * CORN_PRICE_USD_PER_G_GRAIN
 
 
-# 3. Fast Calculation for Rain Conditions
+# Fast Calculation for Rain Conditions
 def check_second_rain(row):
     # Extract weather data using the rollout index
     rainfall_data = rollout_parameters[row['rollout_index']].rainfalls
@@ -175,7 +175,7 @@ df['rainy_second_three_days'] = df.apply(check_second_rain, axis=1)
 # Ensure the first rain column is boolean to match
 df['rainy_start'] = df['rainy_start'].astype(bool)
 
-# 4. Group Data by Subplot Conditions and Plot in Bulk
+# Group Data by Subplot Conditions and Plot in Bulk
 # We can map the booleans directly to subplot matrix coordinates!
 # not rain1 (0) -> col 0 | rain1 (1) -> col 1
 # not rain2 (0) -> row 0 | rain2 (1) -> row 1
@@ -260,4 +260,100 @@ plt.show(block=True)
 # 6. Rollout scatter plot of N leaching against relative yield for different control periods; 2x2, depending on whether there is rain during the first forecast and second forcecast for the respective control frequency
 # 7. P(violation) vs relative yield for non-violating rollouts only (same as 1. but the profit is only averaged over non-violating rollouts
 
+import pandas as pd
+import numpy as np
+import numpy.typing as npt
+import matplotlib.pyplot as plt
+import pickle as pkl
+from dataclasses import dataclass, field, asdict
 
+from main import N_SUFFICIENT_YIELD_G_GRAIN_PER_M2, CORN_PRICE_USD_PER_G_GRAIN
+
+@dataclass
+class StochasticParameters:
+    rainfalls: npt.NDArray[np.float64]
+    initial_moisture: float
+    initial_ammonium: float
+    initial_nitrate: float
+
+rollouts_by_control_period = {}
+dtypes_dict = {"control_period": np.int32, "parameters_idx": np.int32, "violated": np.bool}
+with open("3_days_rollouts.csv", "r") as f:
+    rollouts_by_control_period[3] = pd.read_csv(f, dtype=dtypes_dict)
+with open("9_days_rollouts.csv", "r") as f:
+    rollouts_by_control_period[9] = pd.read_csv(f, dtype=dtypes_dict)
+with open("36_days_rollouts.csv", "r") as f:
+    rollouts_by_control_period[36] = pd.read_csv(f, dtype=dtypes_dict)
+with open("6_days_rollouts.csv", "r") as f:
+    rollouts_by_control_period[6] = pd.read_csv(f, dtype=dtypes_dict)
+rollouts_by_control_period[3]
+
+with open("rollout_parameters.pkl", "rb") as f:
+    rollout_parameters = pkl.load(f)
+rollout_parameters
+
+for period_days, rollouts_df in rollouts_by_control_period.items():
+    # rollouts_df["rainfall_idx"] = list(range(400)) * 3
+    # rollouts_df["control_period"] = [period_days] * 1200
+    rollouts_df.set_index(["control_period", "penalty", "parameters_idx"], inplace=True)
+
+
+full_df = pd.concat(list(rollouts_by_control_period.values()))
+full_df["relative_yield"] = 1.0 - (full_df["deficit_cost"]  / N_SUFFICIENT_YIELD_G_GRAIN_PER_M2 / CORN_PRICE_USD_PER_G_GRAIN)
+full_df["rainy_start"] = [(stochastic_parameters.rainfalls[0] > 0 or stochastic_parameters.rainfalls[1] > 0 or stochastic_parameters.rainfalls[2] > 0) for stochastic_parameters in rollout_parameters] * int(len(full_df) / len(rollout_parameters))
+full_df
+
+means = full_df.groupby(["control_period", "penalty"]).mean()
+
+plt.plot(full_df.groupby(["control_period", "penalty"]).mean().loc[3]["violated"], full_df.groupby(["control_period", "penalty"]).mean().loc[3]["relative_yield"])
+
+for cntrl_period in [3, 6, 9, 36]:
+    plt.plot(means.loc[cntrl_period]["violated"], means.loc[cntrl_period]["relative_yield"], label="Every "+str(cntrl_period))
+plt.xlabel("Probability of violation")
+plt.ylabel("Relative Yield")
+plt.title("Rollout pareto fronts")
+plt.legend()
+plt.savefig("rollout_pareto_fronts.png", transparent=False, dpi=300, bbox_inches='tight')
+plt.xlim(0.3, 0.75)
+plt.ylim(0.6, 1.0)
+
+
+full_df.groupby(["control_period", "penalty"]).std()
+
+
+for name, group in full_df.groupby(['control_period', 'penalty']):
+    print(name)
+
+leaching_by_penalty = [group['total_leaching_gN_per_m2'].values for name, group in full_df.groupby(['control_period', 'penalty'])]
+
+# Get the penalty labels for the x-axis
+penalty_labels = [str(name[0]) + "_days_" + str(np.round(name[1], 1)) + "_penal" for name, group in full_df.groupby(['control_period', 'penalty'])]
+
+# Create the violin plot
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.violinplot(leaching_by_penalty)
+
+# Set x-axis labels
+ax.set_xticks(range(1, len(penalty_labels) + 1))
+ax.set_xticklabels(penalty_labels)
+ax.tick_params(axis='x', labelrotation=90)
+
+ax.set_ylabel('Total Leaching (gN/m²)')
+ax.set_xlabel('Penalty')
+ax.set_title('Distribution of Total Leaching For Violating Trajectories by Penalty')
+ax.set_ylim([0,2])
+
+plt.show()
+
+
+fine_USD = full_df.index.get_level_values(1).unique()[1]
+fig, ax = plt.subplots(figsize=(10, 6))
+for control_period_days in full_df.index.get_level_values(0).unique():
+    selected_rollouts = full_df.loc[(control_period_days, fine_USD)]
+    ax.scatter(selected_rollouts[selected_rollouts["rainy_start"]]["relative_yield"], selected_rollouts[selected_rollouts["rainy_start"]]["total_leaching_gN_per_m2"], label="every " + str(control_period_days) + ", rainy start")
+    ax.scatter(selected_rollouts[~selected_rollouts["rainy_start"]]["relative_yield"], selected_rollouts[~selected_rollouts["rainy_start"]]["total_leaching_gN_per_m2"], label="every " + str(control_period_days) + ", clear start")
+ax.set_ylabel("Total N leaching (g/m^2)")
+ax.set_xlabel("Relative yield")
+ax.set_title("Relative yield vs N leaching, for $" + str(round(fine_USD, 2)) +" fine")
+ax.legend()
+fig.savefig("leaching_vs_yield_across_frequencies.png", transparent=False, dpi=300, bbox_inches='tight')
