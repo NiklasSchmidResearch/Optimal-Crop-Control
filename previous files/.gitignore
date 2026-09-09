@@ -6,4 +6,3 @@ octave-workspace
 *.pickle
 __pycache__/
 .ipynb_checkpoints/
-*.pkl
